@@ -1,6 +1,11 @@
 import nodemailer from "nodemailer";
 
-export const sendMail = async (username, email, verificationUrl, subject) => {
+export const SendSuccessMail = async (
+  username,
+  email,
+  successMessage,
+  subject
+) => {
   const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 465,
@@ -81,9 +86,9 @@ export const sendMail = async (username, email, verificationUrl, subject) => {
           <div class="content">
             <h1>${subject}</h1>
             <p>Hi ${username},</p>
-            <p>Thank you for registering with us. Please click the button below to ${subject}:</p>
-            <a href="${verificationUrl}" class="button">Verify Email</a>
-            <p>If its not you, please ignore this email and don't share the link.</p>
+            <p>${successMessage}</p>
+            <p>If its not you, for now we don't have functionality to report :(</p>
+            <p>Sorry for that :(</p>
           </div>
           <div class="footer">
             <p>&copy; ${new Date().getFullYear()} Journey Journals. All rights reserved.</p>

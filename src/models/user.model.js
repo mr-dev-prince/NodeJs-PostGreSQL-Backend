@@ -55,11 +55,23 @@ export const User = sequelize.define(
     accessToken: {
       type: DataTypes.STRING,
     },
+    resetToken: {
+      type: DataTypes.STRING,
+    },
+    resetTokenExpiry: {
+      type: DataTypes.DATE,
+    },
+    verifyToken: {
+      type: DataTypes.STRING,
+    },
+    verifyTokenExpiry: {
+      type: DataTypes.DATE,
+    },
     refreshToken: {
       type: DataTypes.STRING,
     },
     refreshTokenExpiry: {
-      type: DataTypes.STRING,
+      type: DataTypes.DATE,
     },
   },
   {
@@ -81,7 +93,6 @@ User.prototype.isPasswordCorrect = async function (password) {
 
 // generate access token
 User.prototype.generateAccessToken = function () {
-  console.log("i am hereeeeee-------------->access-token");
   return jwt.sign(
     {
       id: this.id,
@@ -89,18 +100,17 @@ User.prototype.generateAccessToken = function () {
       email: this.email,
     },
     process.env.ACCESS_TOKEN_SECRET,
-    { expiresIn: 3600 }
+    { expiresIn: "1h" }
   );
 };
 
 // generate refresh token
 User.prototype.generateRefreshToken = function () {
-  console.log("i am hereeeeee-------------->refresh-token");
   return jwt.sign(
     {
       id: this.id,
     },
     process.env.REFRESH_TOKEN_SECRET,
-    { expiresIn: 15 * 24 * 60 * 60 }
+    { expiresIn: "30d" }
   );
 };

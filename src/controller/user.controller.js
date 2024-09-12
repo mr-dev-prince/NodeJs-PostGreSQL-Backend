@@ -3,7 +3,10 @@ import { User } from "../models/user.model.js";
 import { generateTokens } from "../utils/tokens.js";
 import { uploadOnCloundinary } from "../config/cloudinary.config.js";
 import bcrypt from "bcrypt";
-import { sendVerifyEmail } from "../utils/SendMail.js";
+import { sendMail } from "../utils/SendMail.js";
+import jwt from "jsonwebtoken";
+import { Op } from "sequelize";
+import { SendSuccessMail } from "../utils/SendSuccessMail.js";
 
 export const register = async (req, res) => {
   const { name, email, password, username } = req.body;
@@ -13,6 +16,7 @@ export const register = async (req, res) => {
       .status(409)
       .json(ApiResponse.error(409, null, "Empty fields !!"));
   }
+
   try {
     const userExist = await User.findOne({ where: { email, username } });
 
@@ -22,23 +26,31 @@ export const register = async (req, res) => {
         .json(ApiResponse.error(400, "User already exists", null));
     }
 
+    const token = jwt.sign({ email: email }, process.env.TOKEN_SECRET, {
+      expiresIn: "1h",
+    });
+
     const newUser = await User.create({
       name,
       username,
       email,
       password,
+      verifyToken: token,
+      verifyTokenExpiry: Date.now() + 3600 * 1000,
     });
 
     // send verification mail
 
-    const verificationUrl = `http://localhost:8000/api/v1/user/verifyEmail?id=${newUser.id}`;
+    const verificationUrl = `http://localhost:8000/api/v1/user/verifyEmail?token=${token}`;
+    const subject = `Verify your email address`;
 
-    await sendVerifyEmail(username, email, verificationUrl);
+    await sendMail(username, email, verificationUrl, subject);
 
     return res
       .status(201)
       .json(ApiResponse.success(201, newUser, "New User Created!"));
   } catch (error) {
+    console.log("Register error------------>", error);
     return res
       .status(500)
       .json(ApiResponse.error(500, error, "Error while registering user!"));
@@ -65,6 +77,12 @@ export const login = async (req, res) => {
     const user = await User.findOne({
       where: findByEmailOrUsername,
     });
+
+    if (!user) {
+      return res
+        .status(400)
+        .json(ApiResponse.error(400, null, "User doesn't exist"));
+    }
 
     const userId = user.id;
 
@@ -93,6 +111,7 @@ export const login = async (req, res) => {
       .cookie("refreshToken", refreshToken, options)
       .json(ApiResponse.success(200, loggedInUser, "User logged in :)"));
   } catch (error) {
+    console.log("Login error------>", error);
     return res
       .status(500)
       .json(ApiResponse.error(500, error, "Error while logging in !"));
@@ -281,143 +300,265 @@ export const changePassword = async (req, res) => {
 
 export const verifyEmail = async (req, res) => {
   try {
-    const id = req.query?.id;
+    const token = req.query?.token;
 
-    if (!id) {
+    if (!token) {
       return res
         .status(400)
-        .json(ApiResponse.error(400, null, "User ID is required"));
+        .json(ApiResponse.error(400, null, "Unauthorised access !"));
     }
 
-    // Fetch the user first to check if it exists
-    const user = await User.findOne({ where: { id } });
+    const user = await User.findOne({
+      where: { verifyToken: token, verifyTokenExpiry: { [Op.gt]: Date.now() } },
+    });
 
     if (!user) {
       return res
-        .status(404)
-        .json(ApiResponse.error(404, null, "User not found"));
+        .status(400)
+        .json(ApiResponse.error(400, null, "Token Expired"));
     }
 
-    // Check if the user is already verified
     if (user.isEmailVerified) {
       return res
         .status(400)
-        .json(ApiResponse.error(400, null, "Email is already verified"));
+        .json(ApiResponse.error(400, null, "Email already verified"));
     }
 
-    // Update the user's email verification status
-    const [numberOfRowsAffected, [updatedUser]] = await User.update(
-      { isEmailVerified: true },
+    await User.update(
+      { isEmailVerified: true, verifyToken: null, verifyTokenExpiry: null },
+      { where: { verifyToken: token } }
+    );
+
+    return res
+      .status(200)
+      .json(ApiResponse.success(200, null, "Email Verified Successfully!!"));
+  } catch (error) {
+    console.log("email verification error------------->", error);
+    return res
+      .status(500)
+      .json(ApiResponse.error(500, error, "Failed to verify email !"));
+  }
+};
+
+export const resetPasswordEmail = async (req, res) => {
+  const { email, username } = req.body;
+
+  if (!email && !username) {
+    return res.status(400).json(ApiResponse.error(400, null, "Empty fields"));
+  }
+
+  const conditions = [];
+  if (email) {
+    conditions.push({ email });
+  } else {
+    conditions.push({ username });
+  }
+
+  try {
+    const user = await User.findOne({
+      where: { [Op.or]: conditions },
+    });
+
+    if (!user) {
+      return res
+        .status(400)
+        .json(ApiResponse.error(400, null, "User doesn't exists!"));
+    }
+
+    const resetToken = jwt.sign(
+      { email: user.email },
+      process.env.TOKEN_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    await User.update(
       {
-        where: { id },
-        returning: true, // This returns the updated rows
+        resetToken: resetToken,
+        resetTokenExpiry: Date.now() + 3600 * 1000,
+      },
+      {
+        where: { id: user.id },
       }
     );
 
-    if (numberOfRowsAffected === 0) {
+    const resetUrl = `http://localhost:8000/api/v1/user/resetPassword?token=${resetToken}`;
+    const subject = `Reset your password`;
+
+    await sendMail(user.username, user.email, resetUrl, subject);
+
+    return res
+      .status(200)
+      .json(ApiResponse.success(200, null, "Email sent to your mail !"));
+  } catch (error) {
+    console.log("reset password error ------------->", error);
+    return res
+      .status(500)
+      .json(ApiResponse.error(500, error, "Failed to send reset email."));
+  }
+};
+
+export const resetPassword = async (req, res) => {
+  const { newPassword } = req.body;
+
+  if (!newPassword) {
+    return res.status(400).json(ApiResponse.error(400, null, "Empty fields"));
+  }
+
+  const token = req.query?.token;
+
+  if (!token) {
+    return res.status(400).json(ApiResponse.error(400, null, "No token found"));
+  }
+
+  try {
+    const user = await User.findOne({
+      where: { resetToken: token, resetTokenExpiry: { [Op.gt]: Date.now() } },
+    });
+
+    if (!user) {
       return res
         .status(400)
-        .json(ApiResponse.error(400, null, "No changes made"));
+        .json(ApiResponse.error(400, null, "Token expired!"));
     }
 
-    return res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Verification Success</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f4f4f4;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      animation: fadeIn 1s ease-out;
-    }
-    
-    .container {
-      text-align: center;
-      background-color: #ffffff;
-      padding: 40px;
-      border-radius: 8px;
-      box-shadow: 0 0 20px rgba(0,0,0,0.1);
-      animation: slideIn 0.5s ease-out;
-    }
-    
-    h1 {
-      color: #28a745;
-      margin-bottom: 20px;
-      font-size: 2em;
-      animation: bounce 1s ease-out;
-    }
-    
-    p {
-      color: #555555;
-      font-size: 1.2em;
-      margin-bottom: 20px;
-    }
-    
-    .button {
-      display: inline-block;
-      padding: 15px 30px;
-      font-size: 1em;
-      color: #ffffff;
-      background-color: #007bff;
-      text-decoration: none;
-      border-radius: 5px;
-      transition: background-color 0.3s ease;
-    }
-    
-    .button:hover {
-      background-color: #0056b3;
-    }
-    
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-    
-    @keyframes slideIn {
-      from { transform: translateY(-50px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
-    
-    @keyframes bounce {
-      0%, 20%, 50%, 80%, 100% {
-        transform: translateY(0);
-      }
-      40% {
-        transform: translateY(-30px);
-      }
-      60% {
-        transform: translateY(-15px);
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>Congratulations!</h1>
-    <p>Your email has been successfully verified.</p>
-    <a href="/" class="button">Go to Homepage</a>
-  </div>
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-  <script>
-    // Redirect after 5 seconds
-    setTimeout(() => {
-      window.location.href = "/";
-    }, 5000);
-  </script>
-</body>
-</html>
-`);
+    await User.update(
+      { password: hashedPassword },
+      { where: { resetToken: token } }
+    );
+
+    const successMessage = "Your password has been reset successfully !";
+    const subject = "Reset password success";
+
+    await SendSuccessMail(user.username, user.email, successMessage, subject);
+
+    return res
+      .status(200)
+      .json(ApiResponse.success(200, null, "Reset password success"));
   } catch (error) {
     return res
       .status(500)
-      .json(ApiResponse.error(500, error, "Failed to verify email"));
+      .json(ApiResponse.error(500, error, "Failed to reset password !"));
+  }
+};
+
+export const resendVerifyEmail = async (req, res) => {
+  const email = req.user?.email;
+
+  if (!email) {
+    return res
+      .status(400)
+      .json(ApiResponse.error(400, null, "Unauthorized access!"));
+  }
+
+  try {
+    const user = await User.findOne({ where: { email } });
+
+    if (!user) {
+      return res
+        .status(400)
+        .json(ApiResponse.error(400, null, "User not found!"));
+    }
+
+    if (user.isEmailVerified) {
+      return res
+        .status(400)
+        .json(ApiResponse.error(400, null, "Email already verified"));
+    }
+
+    const token = jwt.sign({ email: email }, process.env.TOKEN_SECRET, {
+      expiresIn: "1h",
+    });
+
+    if (!token) {
+      return res
+        .status(405)
+        .json(ApiResponse.error(405, null, "failed to generate token !!"));
+    }
+
+    await User.update(
+      {
+        verifyToken: token,
+        verifyTokenExpiry: Date.now() + 3600 * 1000,
+      },
+      { where: { email } }
+    );
+
+    const verificationUrl = `http://localhost:8000/api/v1/user/verifyEmail?token=${token}`;
+    const subject = `Verify your email address`;
+
+    await sendMail(user.username, user.email, verificationUrl, subject);
+
+    return res
+      .status(200)
+      .json(ApiResponse.success(200, null, "Email sent successfully"));
+  } catch (error) {
+    return res
+      .status(500)
+      .json(ApiResponse.error(500, error, "Failed to send email !"));
+  }
+};
+
+export const changeEmail = async (req, res) => {
+  const reqEmail = req.user?.email;
+
+  if (!reqEmail) {
+    return res
+      .status(400)
+      .json(ApiResponse.error(400, null, "Unauthorized access !"));
+  }
+
+  const { newEmail } = req.body;
+
+  if (!newEmail) {
+    return res
+      .status(400)
+      .json(ApiResponse.error(400, null, "No Email provided !"));
+  }
+
+  try {
+    const user = await User.findOne({ where: { email: reqEmail } });
+
+    if (!user) {
+      return res
+        .status(400)
+        .json(ApiResponse.error(400, null, "User not found!"));
+    }
+
+    const token = jwt.sign({ email: newEmail }, process.env.TOKEN_SECRET, {
+      expiresIn: "1h",
+    });
+
+    await User.update(
+      {
+        email: newEmail,
+        verifyToken: token,
+        verifyTokenExpiry: Date.now() + 3600 * 1000,
+      },
+      { where: { email: reqEmail } }
+    );
+
+    console.log("I am here ----------->");
+
+    const verificationUrl = `http://localhost:8000/api/v1/user/verifyEmail?token=${token}`;
+    const subject = `Verify your email address`;
+
+    await sendMail(user.username, newEmail, verificationUrl, subject);
+
+    return res
+      .status(200)
+      .json(
+        ApiResponse.success(
+          200,
+          null,
+          "Email changed and verification mail sent to the new email address ..."
+        )
+      );
+  } catch (error) {
+    console.log("change email errorr------------>", error);
+    return res
+      .status(500)
+      .json(ApiResponse.error(500, error, "Failed to change email"));
   }
 };

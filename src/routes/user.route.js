@@ -1,11 +1,15 @@
 import { Router } from "express";
 import {
+  changeEmail,
   changePassword,
   deleteUser,
   getUserDetails,
   login,
   logout,
   register,
+  resendVerifyEmail,
+  resetPassword,
+  resetPasswordEmail,
   updateUser,
   uploadProfileImg,
   verifyEmail,
@@ -23,6 +27,11 @@ router.route("/getUser").get(verifyToken, getUserDetails);
 router.route("/logout").get(verifyToken, logout);
 
 router.route("/verifyEmail").get(verifyEmail);
+router.route("/resendVerifyEmail").get(verifyToken, resendVerifyEmail);
+router.route("/sendResetPasswordMail").post(resetPasswordEmail);
+router.route("/changeEmail").post(verifyToken, changeEmail);
+
+router.route("/resetPassword").post(resetPassword);
 
 router.route("/update").patch(verifyToken, updateUser);
 router.route("/changePassword").patch(verifyToken, changePassword);

@@ -9,8 +9,6 @@ export const generateTokens = async (userId) => {
       throw new Error("User not found");
     }
     
-    console.log("I am here -------> generateTokens");
-
     const accessToken = user.generateAccessToken();
     const refreshToken = user.generateRefreshToken();
 
