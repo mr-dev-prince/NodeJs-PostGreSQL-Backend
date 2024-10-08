@@ -69,6 +69,13 @@ export const PostImg = sequelize.define(
   }
 );
 
+Post.hasMany(PostImg, {
+  foreignKey: "postId",
+  as: "images",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
+});
+
 PostImg.belongsTo(Post, {
   foreignKey: "postId",
   onDelete: "CASCADE",

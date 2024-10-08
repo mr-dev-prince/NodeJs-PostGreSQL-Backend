@@ -388,7 +388,13 @@ export const resetPasswordEmail = async (req, res) => {
 
     return res
       .status(200)
-      .json(ApiResponse.success(200, null, "Email sent to your mail !"));
+      .json(
+        ApiResponse.success(
+          200,
+          null,
+          "Reset Password link is sent to your email !"
+        )
+      );
   } catch (error) {
     console.log("reset password error ------------->", error);
     return res
@@ -501,13 +507,6 @@ export const resendVerifyEmail = async (req, res) => {
 };
 
 export const changeEmail = async (req, res) => {
-  const reqEmail = req.user?.email;
-
-  if (!reqEmail) {
-    return res
-      .status(400)
-      .json(ApiResponse.error(400, null, "Unauthorized access !"));
-  }
 
   const { newEmail } = req.body;
 
@@ -515,6 +514,14 @@ export const changeEmail = async (req, res) => {
     return res
       .status(400)
       .json(ApiResponse.error(400, null, "No Email provided !"));
+  }
+
+  const reqEmail = req.user?.email;
+
+  if (!reqEmail) {
+    return res
+      .status(400)
+      .json(ApiResponse.error(400, null, "Unauthorized access !"));
   }
 
   try {
@@ -539,8 +546,6 @@ export const changeEmail = async (req, res) => {
       { where: { email: reqEmail } }
     );
 
-    console.log("I am here ----------->");
-
     const verificationUrl = `http://localhost:8000/api/v1/user/verifyEmail?token=${token}`;
     const subject = `Verify your email address`;
 
@@ -556,7 +561,6 @@ export const changeEmail = async (req, res) => {
         )
       );
   } catch (error) {
-    console.log("change email errorr------------>", error);
     return res
       .status(500)
       .json(ApiResponse.error(500, error, "Failed to change email"));
